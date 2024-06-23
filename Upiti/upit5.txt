@@ -1,0 +1,89 @@
+db.games_v5.aggregate([
+  {
+    $match: {
+      season: { $in: [2022, 2023] }
+    }
+  },
+  
+  { $unwind: "$events" },
+  
+  {
+    $match: {
+      "events.type": "Goals"
+    }
+  },
+
+  {
+    $group: {
+      _id: {
+        club_id: { 
+          $cond: [
+            { $eq: ["$home_club.club_id", "$events.club_id"] },
+            "$home_club.club_id",
+            "$away_club.club_id"
+          ]
+        },
+        player_id: "$events.player_id"
+      },
+      total_player_goals: { $sum: 1 }
+    }
+  },
+
+  {
+    $group: {
+      _id: "$_id.club_id",
+      players: {
+        $push: {
+          player_id: "$_id.player_id",
+          total_player_goals: "$total_player_goals"
+        }
+      },
+      total_club_goals: { $sum: "$total_player_goals" }
+    }
+  },
+  
+  {
+    $match: {
+      total_club_goals: { $gt: 30 }
+    }
+  },
+  
+  { $unwind: "$players" },
+  
+  {
+    $project: {
+      player_id: "$players.player_id",
+      total_player_goals: "$players.total_player_goals",
+      total_club_goals: 1,
+      goal_percentage: { $round: [{ $multiply: [{ $divide: ["$players.total_player_goals", "$total_club_goals"] }, 100] }, 2] }
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "player_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+  
+  {
+    $sort: { goal_percentage: -1 }
+  },
+  
+  { $limit: 20 },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: 1,
+      player_name: "$player_info.name",
+      total_player_goals: 1,
+      total_club_goals: 1,
+      goal_percentage: 1
+    }
+  }
+]);

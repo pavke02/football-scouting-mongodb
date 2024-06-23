@@ -1,0 +1,102 @@
+db.games_v5.aggregate([
+  { $unwind: "$events" },
+  
+  {
+    $match: {
+      "events.type": "Goals"
+    }
+  },
+  
+  {
+    $group: {
+      _id: {
+        player_id: "$events.player_id",
+        is_home: { $eq: ["$events.club_id", "$home_club.club_id"] }
+      },
+      total_goals: { $sum: 1 }
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$_id.player_id",
+      total_goals: { $sum: "$total_goals" },
+      home_goals: {
+        $sum: {
+          $cond: [{ $eq: ["$_id.is_home", true] }, "$total_goals", 0]
+        }
+      },
+      away_goals: {
+        $sum: {
+          $cond: [{ $eq: ["$_id.is_home", false] }, "$total_goals", 0]
+        }
+      }
+    }
+  },
+  
+  {
+    $match: {
+      total_goals: { $gte: 50 }
+    }
+  },
+  
+  {
+    $addFields: {
+      home_goal_percentage: { $multiply: [{ $divide: ["$home_goals", "$total_goals"] }, 100] },
+      away_goal_percentage: { $multiply: [{ $divide: ["$away_goals", "$total_goals"] }, 100] }
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      player_name: "$player_info.name",
+      total_goals: 1,
+      home_goals: 1,
+      away_goals: 1,
+      home_goal_percentage: { $round: ["$home_goal_percentage", 2] },
+      away_goal_percentage: { $round: ["$away_goal_percentage", 2] }
+    }
+  },
+  
+  {
+    $facet: {
+      top_home_goals: [
+        { $sort: { home_goal_percentage: -1 } },
+        { $limit: 10 }
+      ],
+      top_away_goals: [
+        { $sort: { away_goal_percentage: -1 } },
+        { $limit: 10 }
+      ]
+    }
+  },
+  
+  {
+    $project: {
+      combined_results: { $setUnion: ["$top_home_goals", "$top_away_goals"] }
+    }
+  },
+  
+  { $unwind: "$combined_results" },
+  
+  {
+    $replaceRoot: { newRoot: "$combined_results" }
+  },
+  
+  {
+    $sort: { home_goal_percentage: -1 }
+  }
+]);

@@ -1,0 +1,71 @@
+db.games_v5.aggregate([
+  { $unwind: "$events" },
+  
+  // Match goal events
+  {
+    $match: {
+      "events.type": "Goals"
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$events.player_id",
+      total_goals: { $sum: 1 },
+      final_5_minutes_goals: {
+        $sum: {
+          $cond: [
+            {
+              $or: [
+                { $and: [{ $gte: ["$events.minute", 40] }, { $lte: ["$events.minute", 45] }] },
+                { $and: [{ $gte: ["$events.minute", 85] }, { $lte: ["$events.minute", 90] }] }
+              ]
+            },
+            1,
+            0
+          ]
+        }
+      }
+    }
+  },
+  
+  {
+    $match: {
+      total_goals: { $gt: 50 }
+    }
+  },
+  
+  {
+    $addFields: {
+      final_5_minutes_percentage: { $multiply: [{ $divide: ["$final_5_minutes_goals", "$total_goals"] }, 100] }
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+  
+  {
+    $sort: { final_5_minutes_percentage: -1 }
+  },
+  
+  { $limit: 20 },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      player_name: "$player_info.name",
+      total_goals: 1,
+      final_5_minutes_goals: 1,
+      final_5_minutes_percentage: { $round: ["$final_5_minutes_percentage", 2] }
+    }
+  }
+]);

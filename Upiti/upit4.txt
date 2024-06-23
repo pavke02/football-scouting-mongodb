@@ -1,0 +1,174 @@
+db.players_v6.aggregate([
+  {
+    $match: {
+      date_of_birth: { $regex: /^(2004|2005|2006|2007)/ }
+    }
+  },
+  
+  { $limit: 50 },
+  
+  {
+    $lookup: {
+      from: "games_v5",
+      localField: "player_id",
+      foreignField: "lineups.player_id",
+      as: "games"
+    }
+  },
+  
+  { $unwind: "$games" },
+  
+  { $unwind: "$games.events" },
+  
+  {
+    $match: {
+      "games.events.type": "Goals"
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$player_id",
+      name: { $first: "$name" },
+      position: { $first: "$position" },
+      date_of_birth: { $first: "$date_of_birth" },
+      total_goals: {
+        $sum: {
+          $cond: [{ $eq: ["$games.events.player_id", "$player_id"] }, 1, 0]
+        }
+      },
+      total_assists: {
+        $sum: {
+          $cond: [{ $eq: ["$games.events.assist_id", { $concat: [{ $toString: "$player_id" }, ".0"] }] }, 1, 0]
+        }
+      }
+    }
+  },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      name: 1,
+      position: 1,
+      date_of_birth: 1,
+      total_goals: 1,
+      total_assists: 1
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "games_v5",
+      localField: "player_id",
+      foreignField: "lineups.player_id",
+      as: "games_clean_sheets"
+    }
+  },
+  
+  { $unwind: "$games_clean_sheets" },
+
+  { $unwind: "$games_clean_sheets.lineups" },
+  
+  {
+    $match: {
+      $expr: { $eq: ["$player_id", "$games_clean_sheets.lineups.player_id"] }
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$player_id",
+      name: { $first: "$name" },
+      position: { $first: "$position" },
+      date_of_birth: { $first: "$date_of_birth" },
+      total_goals: { $first: "$total_goals" },
+      total_assists: { $first: "$total_assists" },
+      total_clean_sheets: {
+        $sum: {
+          $cond: [
+            { 
+              $and: [
+                { $gte: ["$games_clean_sheets.lineups.minutes_played", 60] },
+                {
+                  $or: [
+                    { $and: [{ $eq: ["$games_clean_sheets.lineups.club_id", "$games_clean_sheets.home_club.club_id"] }, { $eq: ["$games_clean_sheets.away_club.goals", 0] }] },
+                    { $and: [{ $eq: ["$games_clean_sheets.lineups.club_id", "$games_clean_sheets.away_club.club_id"] }, { $eq: ["$games_clean_sheets.home_club.goals", 0] }] }
+                  ]
+                }
+              ]
+            },
+            1,
+            0
+          ]
+        }
+      },
+      total_minutes_played: { $sum: "$games_clean_sheets.lineups.minutes_played" }
+    }
+  },
+  
+  {
+    $addFields: {
+      points: {
+        $switch: {
+          branches: [
+            {
+              case: { $eq: ["$position", "Attack"] },
+              then: { 
+                $add: [
+                  { $multiply: ["$total_goals", 4] },
+                  { $multiply: ["$total_assists", 3] },
+                  { $multiply: [{ $divide: ["$total_minutes_played", 90] }, 2] }
+                ] 
+              }
+            },
+            {
+              case: { $eq: ["$position", "Midfield"] },
+              then: {
+                $add: [
+                  { $multiply: ["$total_goals", 5] },
+                  { $multiply: ["$total_assists", 3] },
+                  { $multiply: ["$total_clean_sheets", 1] },
+                  { $multiply: [{ $divide: ["$total_minutes_played", 90] }, 2] }
+                ]
+              }
+            },
+            {
+              case: { $eq: ["$position", "Defender"] },
+              then: {
+                $add: [
+                  { $multiply: ["$total_goals", 6] },
+                  { $multiply: ["$total_assists", 3] },
+                  { $multiply: ["$total_clean_sheets", 4] },
+                  { $multiply: [{ $divide: ["$total_minutes_played", 90] }, 2] }
+                ]
+              }
+            }
+          ],
+          default: 0
+        }
+      }
+    }
+  },
+  
+  {
+    $sort: { points: -1 }
+  },
+  
+  { $limit: 20 },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      name: 1,
+      position: 1,
+      date_of_birth: 1,
+      total_goals: 1,
+      total_assists: 1,
+      total_clean_sheets: 1,
+      total_minutes_played: 1,
+      points: { $floor: "$points" }
+    }
+  }
+]);

@@ -1,0 +1,88 @@
+db.games_v5.aggregate([
+  { $unwind: "$lineups" },
+  
+  {
+    $match: {
+      "lineups.position": "Goalkeeper"
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$lineups.player_id",
+      player_name: { $first: "$lineups.player_name" },
+      total_minutes_played: { $sum: "$lineups.minutes_played" },
+      total_goals_conceded: {
+        $sum: {
+          $cond: [
+            { $eq: ["$lineups.club_id", "$home_club.club_id"] },
+            "$away_club.goals",
+            "$home_club.goals"
+          ]
+        }
+      }
+    }
+  },
+  
+  {
+    $match: {
+      total_minutes_played: { $gt: 5000 }
+    }
+  },
+  
+  {
+    $addFields: {
+      goals_conceded_per_90: { $multiply: [{ $divide: ["$total_goals_conceded", "$total_minutes_played"] }, 90] }
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+
+  { $unwind: "$player_info.valuations" },
+
+  { $sort: { "player_info.valuations.date": -1 } },
+  
+  {
+    $group: {
+      _id: "$_id",
+      player_name: { $first: "$player_name" },
+      total_goals_conceded: { $first: "$total_goals_conceded" },
+      total_minutes_played: { $first: "$total_minutes_played" },
+      goals_conceded_per_90: { $first: "$goals_conceded_per_90" },
+      market_value: { $first: "$player_info.valuations.market_value_in_eur" }
+    }
+  },
+  
+  {
+    $match: {
+      market_value: { $gt: 1000000 }
+    }
+  },
+  
+  {
+    $sort: { goals_conceded_per_90: 1 }
+  },
+  
+  { $limit: 20 },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      player_name: 1,
+      total_goals_conceded: 1,
+      total_minutes_played: 1,
+      goals_conceded_per_90: { $round: ["$goals_conceded_per_90", 2] },
+      market_value: 1
+    }
+  }
+]);

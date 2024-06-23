@@ -1,0 +1,61 @@
+db.players_v6.aggregate([
+  {
+    $match: {
+      position: "Attack",
+      height_in_cm: { $gt: 190.0 },
+      foot: "left"
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "games_v5",
+      localField: "player_id",
+      foreignField: "events.player_id",
+      as: "games"
+    }
+  },
+  
+  { $unwind: "$games" },
+  
+  { $unwind: "$games.events" },
+  
+  {
+    $match: {
+      "games.events.type": "Goals"
+    }
+  },
+  
+  {
+    $group: {
+      _id: "$games.events.player_id",
+      total_goals: { $sum: 1 }
+    }
+  },
+  
+  {
+    $sort: { total_goals: -1 }
+  },
+  
+  { $limit: 20 },
+  
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      player_name: "$player_info.name",
+      total_goals: 1
+    }
+  }
+]);

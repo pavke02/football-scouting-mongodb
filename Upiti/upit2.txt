@@ -1,0 +1,64 @@
+db.games_v5.aggregate([
+  { $unwind: "$events" },
+  
+  {
+    $match: {
+      "events.assist_id": { $exists: true, $ne: "" }
+    }
+  },
+  
+  {
+    $addFields: {
+      "events.assist_id_str": {
+        $substr: ["$events.assist_id", 0, { $subtract: [{ $strLenCP: "$events.assist_id" }, 2] }]
+      }
+    }
+  },
+  {
+    $group: {
+      _id: "$events.assist_id_str",
+      total_assists: { $sum: 1 }
+    }
+  },
+ 
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  
+  { $unwind: "$player_info" },
+
+  {
+    $match: {
+      $and: [
+        {
+          $or: [
+            { "player_info.sub_position": "Left-Back" },
+            { "player_info.sub_position": "Right-Back" }
+          ]
+        },
+        { "player_info.date_of_birth": { $regex: /^(1998|1999|2000|2001|2002|2003|2004)/ } }
+      ]
+    }
+  },
+  
+  {
+    $project: {
+      _id: 0,
+      player_id: "$_id",
+      player_name: "$player_info.name",
+      position: "$player_info.sub_position",
+      total_assists: 1
+    }
+  },
+  
+  {
+    $sort: { total_assists: -1 }
+  },
+  
+  { $limit: 20 }
+]);

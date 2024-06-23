@@ -1,0 +1,71 @@
+db.games_v5.aggregate([
+  { $match: { date: { $regex: "^(2023|2024)" } } },
+
+  { $unwind: "$events" },
+  
+  { $match: { "events.type": "Goals" } },
+
+  {
+    $group: {
+      _id: "$events.player_id",
+      total_goals: { $sum: 1 }
+    }
+  },
+  
+  {
+    $lookup: {
+      from: "games_v5",
+      let: { playerId: "$_id" },
+      pipeline: [
+        { $match: { date: { $regex: "^(2023|2024)" } } },
+        { $unwind: "$lineups" },
+        { $match: { $expr: { $eq: ["$lineups.player_id", "$$playerId"] } } },
+        { $group: { _id: "$lineups.player_id", total_minutes_played: { $sum: "$lineups.minutes_played" } } }
+      ],
+      as: "minutes_info"
+    }
+  },
+  { $unwind: "$minutes_info" },
+
+  { $match: { "minutes_info.total_minutes_played": { $gte: 2000 } } },
+
+  {
+    $addFields: {
+      goals_per_90_minutes: {
+        $round: [{ $multiply: [{ $divide: ["$total_goals", "$minutes_info.total_minutes_played"] }, 90] }, 2]
+      }
+    }
+  },
+
+  { $sort: { goals_per_90_minutes: -1 } },
+
+  { $limit: 20 },
+
+  {
+    $addFields: {
+      _id: { $toString: "$_id" }
+    }
+  },
+
+    
+  {
+    $lookup: {
+      from: "players_v6",
+      localField: "_id",
+      foreignField: "player_id",
+      as: "player_info"
+    }
+  },
+  { $unwind: "$player_info" },
+
+  {
+    $project: {
+      player_id: "$_id",
+      first_name: "$player_info.first_name",
+      last_name: "$player_info.last_name",
+      total_goals: 1,
+      total_minutes_played: "$minutes_info.total_minutes_played",
+      goals_per_90_minutes: 1
+    }
+  }
+]);
